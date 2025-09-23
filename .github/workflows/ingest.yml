@@ -1,0 +1,36 @@
+name: Market Data Ingestion
+
+on:
+  schedule:
+    - cron: "15 0 * * *"   # every day at 00:15 UTC
+  workflow_dispatch:       # allow manual trigger from GitHub UI
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r python/requirements.txt
+
+      - name: Run ingestion
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          FETCH_OVERLAP_DAYS: "1"
+          SYMBOLS: "BTCUSDT,ETHUSDT,AAPL,TSLA,SPY,QQQ,IEF,GLD,IBM"
+        run: |
+          source venv/bin/activate
+          python python/ingested_multiple_symbols.py
