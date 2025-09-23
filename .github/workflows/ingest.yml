@@ -34,7 +34,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
           FETCH_OVERLAP_DAYS: "1"
-          SYMBOLS: "IBM,AAPL,TSLA,BTC-USD"
+          SYMBOLS: "BTCUSDT,ETHUSDT,AAPL,TSLA,SPY,QQQ,IEF,GLD,IBM"
         run: |
           source venv/bin/activate
           python python/ingested_multiple_symbols.py
