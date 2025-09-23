@@ -1,14 +1,20 @@
 import os
 import asyncio
 from datetime import datetime, timedelta
-from datetime import datetime, timezone
-
 from typing import Any, Dict, List, Tuple
 from dotenv import load_dotenv
 from supabase import create_client, Client
-
 from providers.alpha_vantage import AlphaVantageProvider
 from providers.types import CandleDaily
+
+import logging
+logging.basicConfig(
+    level=logging.INFO,  # 👈 allow INFO and above
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]  # 👈 ensure logs go to terminal
+)
+logger = logging.getLogger(__name__)
+
 
 
 
@@ -96,10 +102,10 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 	instrument_id = None
 	if instruments_resp.data and len(instruments_resp.data) > 0:
 		instrument_id = instruments_resp.data[0]["id"]
-		print(f"✅ Found existing instrument_id: {instrument_id} for symbol: {instrument_symbol}")
+		logger.info(f"✅ Found existing instrument_id: {instrument_id} for symbol: {instrument_symbol}")
 	else:
 		# Create new instrument record with proper fields
-		print(f"📝 Creating new instrument record for symbol: {instrument_symbol}")
+		logger.info(f"📝 Creating new instrument record for symbol: {instrument_symbol}")
 		inst_type = (
 			"crypto" if ("-" in instrument_symbol and instrument_symbol.upper().endswith("-USD"))
 			else "index" if instrument_symbol.startswith("^")
@@ -116,63 +122,10 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 		
 		if new_instrument.data:
 			instrument_id = new_instrument.data[0]["id"]
-			print(f"✅ Created instrument_id: {instrument_id} for symbol: {instrument_symbol}")
+			logger.info(f"✅ Created instrument_id: {instrument_id} for symbol: {instrument_symbol}")
 		else:
 			raise RuntimeError(f"Failed to create instrument record for {instrument_symbol}")
 
-	mode = os.environ.get("MODE", run_type).lower()  # 'daily' or 'hours'
-
-
-	# if mode in ("hours", "intraday"):
-	# 	# Intraday mode: derive since_ts from last stored daily date, else 2022-01-01
-	# 	interval = os.environ.get("INTRADAY_INTERVAL", "60min")
-	# 	last_daily_resp = client.table("ohlcv_data").select("date").eq("instrument_id", instrument_id).order("date", desc=True).limit(1).execute()
-	# 	if last_daily_resp.data and len(last_daily_resp.data) > 0:
-	# 		last_date = datetime.fromisoformat(str(last_daily_resp.data[0]["date"]))
-	# 		# Start from the beginning of that day to ensure we capture the full day if needed
-	# 		since_dt = datetime(year=last_date.year, month=last_date.month, day=last_date.day)
-	# 		print(f"⏱️ Intraday mode: last daily record {last_date.date()}, fetching from {since_dt}")
-	# 	else:
-	# 		# No daily data yet → start from 2022-01-01 00:00:00
-	# 		since_dt = datetime.strptime("2022-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
-	# 		print(f"⏱️ Intraday mode: no previous data, fetching from {since_dt}")
-	# 	until_dt = datetime.utcnow()
-	# 	since_ts = since_dt.strftime("%Y-%m-%d %H:%M:%S")
-	# 	until_ts = until_dt.strftime("%Y-%m-%d %H:%M:%S")
-	# 	intraday = await provider.fetch_intraday(fetch_symbol, interval=interval, since_ts=since_ts, until_ts=until_ts)
-	# 	# Convert to simple dicts for aggregator
-	# 	intraday_dicts = [{
-	# 		"ts": c.ts,
-	# 		"open": c.open,
-	# 		"high": c.high,
-	# 		"low": c.low,
-	# 		"close": c.close,
-	# 		"volume": c.volume,
-	# 	} for c in intraday]
-	# 	daily_map = aggregate_intraday_to_daily(intraday_dicts)
-	# 	upserts = 0
-	# 	for date_key, v in daily_map.items():
-	# 		row = {
-	# 			"instrument_id": instrument_id,
-	# 			"instrument_symbol": instrument_symbol,
-	# 			"date": date_key,
-	# 			"open": v["open"],
-	# 			"high": v["high"],
-	# 			"low": v["low"],
-	# 			"close": v["close"],
-	# 			"volume": v.get("volume") or 0,
-	# 		}
-	# 		try:
-	# 			client.table("ohlcv_data").upsert(row, on_conflict="instrument_id,date").execute()
-	# 			upserts += 1
-	# 		except Exception as e:
-	# 			print(f"❌ Error upserting {date_key}: {e}")
-	# 	print(f"✅ Intraday aggregated → daily upserts: {upserts} under {instrument_symbol}")
-	# 	return {"ok": True, "upserts": upserts, "mode": mode}
-
-
-
-	# Daily mode below
 	# Check existing data to determine date range
 	# Use a small overlap (default 1 day) to avoid missing late updates, rely on upsert to dedupe
 	overlap_days = int(os.environ.get("FETCH_OVERLAP_DAYS", "1"))
@@ -183,13 +136,12 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 		last_date = datetime.fromisoformat(str(resp.data[0]["date"]))
 		since_dt = last_date - timedelta(days=overlap_days)
 		since = iso_date(since_dt)
-		print(f"📅 Last data date: {last_date.strftime('%Y-%m-%d')}, fetching from: {since}")
+		logger.info(f"📅 Last data date: {last_date.strftime('%Y-%m-%d')}, fetching from: {since}")
 	else:
 		# Set default start date to January 1, 2022
 		since = "2022-01-01"
 
-
-		print(f"📅 No existing data found, fetching from default start date: {since}")
+		logger.warning(f"📅 No existing data found, fetching from default start date: {since}")
 
 	today = iso_date(datetime.utcnow())
 
@@ -199,7 +151,7 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 	candles: List[CandleDaily] = await provider.fetch_daily(fetch_symbol, since, today)
 	upserts = 0
 
-	print(f"📊 Fetched {len(candles)} candles from Alpha Vantage for {fetch_symbol} (storing under {instrument_symbol})")
+	logger.info(f"📊 Fetched {len(candles)} candles from Alpha Vantage for {fetch_symbol} (storing under {instrument_symbol})")
 
 	# Process candles in batches to avoid issues
 	batch_size = int(os.environ.get("ALPHA_VANTAGE_BATCH_SIZE", "50"))
@@ -207,7 +159,7 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 	for i in range(0, len(candles), batch_size):
 		batch = candles[i:i + batch_size]
 		rows = []
-		print(f"📦 Processing batch {i//batch_size + 1}/{(len(candles) + batch_size - 1)//batch_size}")
+		logger.info(f"📦 Processing batch {i//batch_size + 1}/{(len(candles) + batch_size - 1)//batch_size}")
 		
 		for c in batch:
 			if not c.date:
@@ -233,16 +185,14 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 		try:
 			# Atomic upsert avoids duplicates on (instrument_id, date)
 			client.table("ohlcv_data").upsert(rows, on_conflict="instrument_id,date").execute()
-			# upserts += 1
-			print(f"Upserted {len(rows)} candles for {instrument_symbol}")
 
+			logger.info(f"Upserted {len(rows)} candles for {instrument_symbol}")
 		except Exception as e:
-			# print(f"❌ Error upserting {c.date}: {e}")
-			print(f"Error upserting batch for {instrument_symbol}: {e}")
+			logger.warning(f"Error upserting batch for {instrument_symbol}: {e}")
 
 			# continue
 
-	print(f"✅ Successfully processed {upserts} records under {instrument_symbol}")
+	logger.info(f"✅ Successfully processed  records under {instrument_symbol}")
 
 	return {"ok": True, "upserts": upserts, "mode": "daily"}
 
@@ -259,22 +209,22 @@ if __name__ == "__main__":
 		symbols = [single_symbol] if single_symbol else []
 
 	if not symbols:
-		print("⚠️ No symbols provided. Set SYMBOLS='AAPL,TSLA' or SYMBOL='AAPL'.")
+		logger.info("⚠️ No symbols provided. Set SYMBOLS='AAPL,TSLA' or SYMBOL='AAPL'.")
 		exit(1)
 
-	print(f"🚀 Starting ingestion for symbols: {symbols}")
+	logger.info(f"🚀 Starting ingestion for symbols: {symbols}")
 
 	async def run_all():
 		results: Dict[str, Any] = {}
 		for idx, orig_sym in enumerate(symbols, start=1):
 			api_sym, note = resolve_alpha_vantage_symbol(orig_sym)
 			if note == "skip_unsupported" or not api_sym:
-				print(f"⏭️ Skipping unsupported for Alpha Vantage: {orig_sym}")
+				logger.info(f"⏭️ Skipping unsupported for Alpha Vantage: {orig_sym}")
 				continue
 			if api_sym != orig_sym:
-				print(f"🔁 Mapping {orig_sym} → {api_sym} ({note})")
+				logger.info(f"🔁 Mapping {orig_sym} → {api_sym} ({note})")
 
-			print(f"➡️ [{idx}/{len(symbols)}] Processing {orig_sym} (fetch {api_sym})")
+			logger.info(f"➡️ [{idx}/{len(symbols)}] Processing {orig_sym} (fetch {api_sym})")
 			try:
 				res = await ingest_alpha_vantage(display_symbol=orig_sym, api_symbol=api_sym)
 				results[orig_sym] = {"api_symbol": api_sym, **res}
@@ -282,9 +232,9 @@ if __name__ == "__main__":
 				sleep_time = int(os.environ.get("ALPHA_VANTAGE_SLEEP_SECONDS", "2"))
 				await asyncio.sleep(sleep_time)
 			except Exception as e:
-				print(f"❌ Failed {orig_sym} (via {api_sym}): {e}")
+				logger.warning(f"❌ Failed {orig_sym} (via {api_sym}): {e}")
 				results[orig_sym] = {"ok": False, "error": str(e), "api_symbol": api_sym}
 		return results
 
 	final_results = asyncio.run(run_all())
-	print(f"🎉 Completed: {final_results}")
+	logger.info(f"🎉 Completed: {final_results}")

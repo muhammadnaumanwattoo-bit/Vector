@@ -6,21 +6,11 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
-
-# Environment variables
 .env
 
 # VS Code settings
 .vscode/
 
-# Coverage reports
-htmlcov/
-coverage.xml
-*.cover
-*.py,cover
-
 # Logs
 *.log
-
-app/static/
-/static/
+*.txt

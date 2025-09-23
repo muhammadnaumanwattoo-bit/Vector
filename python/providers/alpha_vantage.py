@@ -1,9 +1,17 @@
 import os
 from typing import List, Optional
 import httpx
-from .types import CandleDaily, MarketDataProvider, CandleIntraday
-from datetime import datetime, timezone
+from .types import CandleDaily, CandleIntraday
+from datetime import datetime
 
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AlphaVantageProvider:
@@ -45,16 +53,41 @@ class AlphaVantageProvider:
 
 				rows: List[CandleDaily] = []
 				for date, v in series.items():
-					# Use USD fields (suffix (USD))
-					row = CandleDaily(
-						date=date,
-						open=float(v.get("1a. open (USD)", v.get("1b. open (USD)", 0)) or 0),
-						high=float(v.get("2a. high (USD)", v.get("2b. high (USD)", 0)) or 0),
-						low=float(v.get("3a. low (USD)", v.get("3b. low (USD)", 0)) or 0),
-						close=float(v.get("4a. close (USD)", v.get("4b. close (USD)", 0)) or 0),
-						volume=int(float(v.get("5. volume", 0))) if v.get("5. volume") else None,
-					)
-					rows.append(row)
+
+					try:
+						if "1a. open (USD)" in v or "1b. open (USD)" in v:
+							# Crypto JSON format
+							open_val = v.get("1a. open (USD)") or v.get("1b. open (USD)")
+							high_val = v.get("2a. high (USD)") or v.get("2b. high (USD)")
+							low_val = v.get("3a. low (USD)") or v.get("3b. low (USD)")
+							close_val = v.get("4a. close (USD)") or v.get("4b. close (USD)")
+						else:
+							# Equity-style JSON format (sometimes used for BTC-USD)
+							open_val = v.get("1. open")
+							high_val = v.get("2. high")
+							low_val = v.get("3. low")
+							close_val = v.get("4. close")
+
+
+						if not (open_val and high_val and low_val and close_val):
+							logger.warning(f"Skipping {symbol} at {date} due to missing OHLC data: {v}")
+							continue
+
+
+
+						# Use USD fields (suffix (USD))
+						row = CandleDaily(
+							date=date,
+							open=float(open_val),
+							high=float(high_val),
+							low=float(low_val),
+							close=float(close_val),
+							volume=int(float(v["5. volume"])) if "5. volume" in v else None,
+						)
+						rows.append(row)
+
+					except Exception as e:
+						logging.error(f"Error parsing {symbol} at {date}: {e} | raw={v}")
 
 				filtered = [r for r in rows if (since is None or r.date >= since) and (until is None or r.date <= until)]
 				filtered.sort(key=lambda r: r.date)
