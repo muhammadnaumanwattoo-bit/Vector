@@ -179,20 +179,20 @@ async def ingest_alpha_vantage(display_symbol: str, api_symbol: str | None = Non
 			)
 		if not rows:
 			continue
-                
+					
 
 			
 		try:
 			# Atomic upsert avoids duplicates on (instrument_id, date)
 			client.table("ohlcv_data").upsert(rows, on_conflict="instrument_id,date").execute()
-
+			upserts += len(rows)
 			logger.info(f"Upserted {len(rows)} candles for {instrument_symbol}")
 		except Exception as e:
 			logger.warning(f"Error upserting batch for {instrument_symbol}: {e}")
 
 			# continue
 
-	logger.info(f"✅ Successfully processed  records under {instrument_symbol}")
+	logger.info(f"✅ Successfully processed {upserts} records under {instrument_symbol}")
 
 	return {"ok": True, "upserts": upserts, "mode": "daily"}
 
