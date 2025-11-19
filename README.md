@@ -55,7 +55,7 @@ python3 ingested_multiple_symbols.py
 
 ## Tables Used
 - `instruments`: stores instrument metadata (symbol, type, provider, currency)
-- `ohlcv_data`: stores daily bars keyed by `(instrument_id, date)`
+- `ohlcv_data`: stores daily bars keyed by `(instrument_id, date, open, high, low, close, volume)`
 
 The Python ingestor will create missing `instruments` rows as needed and then upsert daily OHLCV rows.
 
